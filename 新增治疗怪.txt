@@ -1,0 +1,1461 @@
+import {build_game,
+        update_loop,
+        enable_debug,
+        set_fps,
+        set_dimensions,
+        debug_log,
+        
+        create_sprite,
+        get_loop_count,
+        
+        input_key_down,
+        
+        query_position,
+        query_scale,
+        
+          update_to_top,
+          update_scale,
+          update_position,
+          
+          update_rotation,
+          query_pointer_position,
+          
+          update_color,
+          update_text,
+          
+          create_rectangle,
+          create_text,
+          input_left_mouse_down,
+          
+          gameobjects_overlap,
+          
+          create_audio,
+          play_audio,
+          loop_audio
+          
+
+ } from "arcade_2d";
+
+//world properties
+    //世界大小
+    const height=720;
+    const width=720*1.1;
+    set_dimensions([width,height]); //设置大小
+    //对象管理
+    let objects=[];
+    let enermys=[];
+    let players=[];
+
+    // 地图移动相关
+    let tile_sprites = [];   // 所有 tile sprite
+    let player_map_px = 0;   // 玩家在地图像素空间中的 X 坐标
+    let player_map_py = 0;   // 玩家在地图像素空间中的 Y 坐标
+    const tile_pixel = 40;   // 16 * 2.5
+
+
+//basic settings
+    //enable_debug();
+    //帧数
+    let fps=60;
+    set_fps(fps);
+
+//player
+let player_speed=2.5;
+let player_hp=5;  
+const player_max_hp = 5;
+const player_scale=2.5; //玩家贴图缩放
+let player_hurt_cd = 0;
+const player_hurt_interval = 120;
+let player_hit_timer = 0;
+let player_frame2 = undefined;
+let player_anim_timer = 0;
+let player_moving = false;
+let player_dir_sign = 1;
+
+const die_s1 = create_audio("https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/main/1.0.m4a", 0.8);
+const die_s2 = create_audio("https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/main/2.0.m4a", 0.8);
+const die_s3 = create_audio("https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/main/4.0.m4a", 0.8);
+const bgm = create_audio("https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/main/background.mp3", 0.1);
+const shoot_sound = create_audio("https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/main/gun1.m4a", 0.8);
+
+const hpBarWidth = 200;
+const hpBarHeight = 14;
+let hpBarBackground = undefined;
+let hpBarFill = undefined;
+let xpBarBackground = undefined;
+let xpBarFill = undefined;
+let gameover_active = false;
+let gameover_card = undefined;
+let gameover_text = undefined;
+let player_level = 1;    // 等级
+let player_kills = 0;    // 当前等级杀敌数
+
+//level up
+let levelup_active = false;
+let levelup_click_lock = false;
+let levelup_options = [];
+const upgrade_names = ['Multishot -15%dmg','Range','FireRate','Size +40%dmg','Damage +50%','Move Speed','PrepareForBoth','KeepAway','Bloodlust'];
+let has_backshot = false;
+
+let has_knockback = false;
+let has_bloodlust = false;
+let blood_kills = 0;
+
+let lv_title_card = undefined;
+let lv_title_text = undefined;
+let lv_cards = [];   // 卡牌矩形
+let lv_texts = [];   // 卡牌文字
+
+//gun
+const gun_scale=0.6; //gun贴图缩放
+
+//bullet
+let bullet_radius = 4;       // 子弹半径
+let bullet_speed = 8;        // 子弹初始速度（像素/帧）
+let bullet_range = 160;      // 子弹射程 = 3瓦片距离（像素）
+let bullets_per_shot = 1;    // 单次发射子弹数
+let bullet_total_spread = 0.3; // 总散射角（弧度），约 17°
+let bullet_fire_rate = 40;   // 射速（帧间隔）
+let bullet_damage = 1;        // 子弹伤害倍率
+
+const bullet_pool_size = 250;  // 预创建子弹池大小
+let bullet_life = math_round(bullet_range / bullet_speed); // 存活帧数 = 射程/速度
+let b_sprites = [];   // 子弹精灵（预创建，复用）
+let b_active = [];    // 是否活跃
+let b_vx = [];        // X速度
+let b_vy = [];        // Y速度
+let b_life = [];      // 已存活帧数
+let fire_cooldown = 0; // 射击冷却帧数
+
+//enemy bullet
+const eb_pool_size = 50;
+const eb_speed = 3.5;
+const eb_max_life = 120;
+let eb_sprites = [];
+let eb_active = [];
+let eb_vx = [];
+let eb_vy = [];
+let eb_life = [];
+
+//particle
+const particle_pool_size = 200;     // 粒子池大小
+const particle_count = 8;           // 每次爆炸粒子数
+const particle_speed = 3;           // 粒子速度
+const particle_life = 20;           // 粒子存活帧数
+let p_sprites = [];   // 粒子精灵
+let p_active = [];    // 是否活跃
+let p_vx = [];        // X速度
+let p_vy = [];        // Y速度
+let p_life = [];      // 剩余帧数
+let p_is_bomb = [];   // 是否为爆炸怪粒子
+let p_is_heal = [];
+
+
+
+
+function player() { //玩家类
+    
+    return message => {
+
+        if (message === "create_player") {
+            //不接受参数 创建玩家（贴图对象）（贴图放大了2.5倍）
+            const player_ins= create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/main/npc_elf.png');
+            return update_scale(player_ins,[player_scale,player_scale]);
+        }
+        
+        if (message === "update_position") { 
+            //接受一个object 即玩家 将其位置更新在屏幕中心
+            return player=>update_position(player,[width/2,height/2]);
+        }
+        
+        if (message === "damage") { 
+            //接受一个number 受伤函数 使玩家hp减少 开启闪红
+            return amount => {
+                player_hp = player_hp - amount;
+                player_hit_timer = 10;
+            };
+        }
+
+        if (message === "update_color") {
+            //根据闪红计时器更新玩家颜色
+            return player_obj => {
+                if (player_hit_timer > 0) {
+                    player_hit_timer = player_hit_timer - 1;
+                    update_color(player_obj, [255, 0, 0, 255]);
+                } else {
+                    update_color(player_obj, [255, 255, 255, 255]);
+                }
+            };
+        }
+        
+        if (message === "determine_direction") { 
+            //接受一个对象,和number 即玩家和x轴速度 结果是根据速度改变玩家朝向
+            return (object,speed_x) => {
+                if(speed_x>0){
+                    player_dir_sign = 1;
+                } else {
+                    player_dir_sign = -1;
+                }
+            };
+        }
+
+    };
+
+}
+
+//enemy
+function enemy(initial_hp, initial_speed, texture_url, behavior) { //敌人类
+
+    let max_hp = initial_hp;
+    let hp = 0;
+    const speed = initial_speed;
+    let sprite = undefined;
+    const enemy_scale = 2.5;
+    let hit_timer = 0;
+    let move_timer = 0;
+    let fire_timer = 30;
+
+    return message => {
+        if (message === "init") {
+            //只在初始化时调用 创建隐藏的敌人贴图
+            return () => {
+                sprite = create_sprite(texture_url);
+                update_scale(sprite, [0, 0]);
+                update_position(sprite, [-9999, -9999]);
+                return sprite;
+            };
+        }
+
+        if (message === "spawn") {
+            //激活沉睡的敌人 传送到出生点 hp随玩家等级动态变化
+            return (start_x, start_y) => {
+                hp = math_round(max_hp * (player_level + 1) / 5); //基于玩家等级赋予血量
+                if (hp < 1) { hp = 1; }
+                hit_timer = 0;
+                move_timer = math_floor(math_random() * 100);
+                update_rotation(sprite, 0);
+                update_color(sprite, [255, 255, 255, 255]);
+                update_scale(sprite, [-enemy_scale, enemy_scale]);
+                update_position(sprite, [start_x, start_y]);
+            };
+        }
+
+        if (message === "is_alive") {
+            //查询敌人是否存活
+            return () => hp > 0;
+        }
+
+        if (message === "damage") {
+            //接受一个number 使敌人hp减少 hp归零时隐藏 受伤闪红
+            return amount => {
+                if (hp > 0) {
+                    hp = hp - amount;
+                    hit_timer = 10;
+                    update_color(sprite, [255, 0, 0, 255]);
+                    
+                    //如果死亡
+                    if (hp <= 0) { //随机播放dead音效
+                        let rs = math_random();
+                        if (rs < 0.3) { play_audio(die_s1); }
+                        else if (rs < 0.6) { play_audio(die_s2); }
+                        else { play_audio(die_s3); }
+                        //粒子特效
+                        let die_x = query_position(sprite)[0];
+                        let die_y = query_position(sprite)[1];
+                         particles()('emit')(die_x, die_y);
+                        //爆炸怪 死亡AOE
+                        if (behavior === 5) {
+                            particles()('bomb_emit')(die_x, die_y);
+                            for (let i = 0; i < array_length(enermys); i = i + 1) {
+                                if (enermys[i]('is_alive')()) {
+                                    let ep = query_position(enermys[i]('get_sprite')());
+                                    let edx = die_x - ep[0];
+                                    let edy = die_y - ep[1];
+                                    if (math_sqrt(edx*edx + edy*edy) < 53) {
+                                        enermys[i]('damage')(math_round(max_hp * 2 / 3));
+                                    }
+                                }
+                            }
+                            if (math_abs(die_x - width/2) < 53 && math_abs(die_y - height/2) < 53 &&
+                                (die_x-width/2)*(die_x-width/2) + (die_y-height/2)*(die_y-height/2) < 2809) {
+                                player()('damage')(2);
+                            }
+                        }
+                        //加经验
+                        player_kills = player_kills + 1;
+                        if (has_bloodlust) {
+                            blood_kills = blood_kills + 1;
+                            if (blood_kills >= 5) {
+                                blood_kills = 0;
+                                if (player_hp < player_max_hp) { player_hp = player_hp + 1; }
+                            }
+                        }
+                        //player升级
+                        let need = 3 + 2 * player_level;
+                        if (player_kills >= need) {
+                            player_level = player_level + 1;
+                            player_kills = 0;
+                            if (player_level / 10 === math_floor(player_level / 10)) {
+                                player_hp = player_max_hp;
+                            }
+                            show_levelup();
+                        }
+                        //缩放到0 放到地图外
+                        update_scale(sprite, [0, 0]);
+                        update_position(sprite, [-9999, -9999]);
+                    }
+                }
+            };
+        }
+
+        if (message === "chase_player") {
+            //行为模式+行走动画 遇墙分轴滑动 闪红
+            return () => {
+                if (sprite !== undefined && hp > 0) {
+                    if (hit_timer > 0) {
+                        hit_timer = hit_timer - 1;
+                        if (hit_timer <= 0) {
+                            update_color(sprite, [255, 255, 255, 255]);
+                        }
+                    }
+                    move_timer = move_timer + 1;
+                    let pos = query_position(sprite);
+                    let ex = pos[0];
+                    let ey = pos[1];
+                    let dx = (width / 2) - ex;
+                    let dy = (height / 2) - ey;
+                    let dist = math_sqrt(dx * dx + dy * dy);
+                    if (dist > 0) {
+                        let dir_x = dx / dist;
+                        let dir_y = dy / dist;
+                        let mx = 0;
+                        let my = 0;
+                        let cur_sp = speed;
+                        let cycle = 0;
+                        if (behavior === 1) {
+                            mx = dir_x * speed;
+                            my = dir_y * speed;
+                        } else if (behavior === 2) {
+                            let wave = math_sin(move_timer * 0.08) * 1.5;
+                            mx = dir_x * speed + (-dir_y * wave);
+                            my = dir_y * speed + (dir_x * wave);
+                        } else if (behavior === 3) {
+                            cycle = move_timer % 100;
+                            if (cycle < 20) { cur_sp = speed * 16; }
+                            else if (cycle < 85) { cur_sp = speed; }
+                            else { cur_sp = 0; }
+                            mx = dir_x * cur_sp;
+                            my = dir_y * cur_sp;
+                        } else if (behavior === 4) {
+                            if (dist > 400) { mx = 0; my = 0; }
+                            else if (dist > 300) { mx = dir_x * speed; my = dir_y * speed; }
+                            else { mx = 0; my = 0; }
+                            fire_timer = fire_timer - 1;
+                            if (fire_timer <= 0 && dist <= 300) {
+                                enemy_bullets()('fire')(ex, ey, width / 2, height / 2);
+                                fire_timer = 60;
+                            }
+                        } else if (behavior === 5) {
+                            mx = dir_x * speed;
+                            my = dir_y * speed;
+                        }                        
+                        
+                         else if (behavior === 6) {
+                            mx = dir_x * speed * 0.4;
+                            my = dir_y * speed * 0.4;
+                            fire_timer = fire_timer - 1;
+                            if (fire_timer <= 0) {
+                                fire_timer = 300;
+                                particles()('heal_emit')(ex, ey);
+                                for (let h = 0; h < array_length(enermys); h = h + 1) {
+                                    if (enermys[h]('is_alive')()) {
+                                        let hp_pos = query_position(enermys[h]('get_sprite')());
+                                        let hdx = hp_pos[0] - ex;
+                                        let hdy = hp_pos[1] - ey;
+                                        if (hdx*hdx + hdy*hdy < 14400) {
+                                            enermys[h]('heal')(2);
+                                            particles()('heal_emit')(hp_pos[0], hp_pos[1]);  // ← 被回血的怪也闪绿光
+                                        }
+                                    }
+                                }
+                            }
+
+                         }
+
+                        
+                        let wobble = 0;
+                        let sy_anim = enemy_scale;
+                        if (cur_sp > 0) {
+                            let freq = (behavior === 3 && cycle < 20) ? 0.26 : 0.2;
+                            wobble = math_sin(move_timer * freq) * 0.10;
+                            sy_anim = enemy_scale + math_abs(math_sin(move_timer * freq)) * 0.3;
+                        }
+                        update_rotation(sprite, wobble);
+                        let empx = player_map_px + (ex - width / 2);
+                        let empy = player_map_py + (ey - height / 2);
+                        let nx = ex;
+                        let ny = ey;
+                        let tx = math_floor(empx / tile_pixel);
+                        let ty = math_floor(empy / tile_pixel);
+                        if (!is_wall(tile_map, math_floor((empx + mx) / tile_pixel), ty)) {
+                            nx = ex + mx;
+                        }
+                        if (!is_wall(tile_map, tx, math_floor((empy + my) / tile_pixel))) {
+                            ny = ey + my;
+                        }
+                        update_position(sprite, [nx, ny]);
+                        if (dx > 0) {
+                            update_scale(sprite, [-enemy_scale, sy_anim]);
+                        } else {
+                            update_scale(sprite, [enemy_scale, sy_anim]);
+                        }
+                    }
+                }
+            };
+        }
+
+        if (message === "update_map_offset") {
+            //接受两个number 地图移动时敌人同步偏移
+            return (dx, dy) => {
+                if (sprite !== undefined && hp > 0) {
+                    let pos = query_position(sprite);
+                    update_position(sprite, [pos[0] - dx, pos[1] - dy]);
+                }
+            };
+        }
+
+        if (message === "get_sprite") {
+            //返回敌人sprite 用于碰撞检测
+            return () => sprite;
+        }
+
+        if (message === "get_behavior") {
+            //返回敌人行为模式 用于击退判断
+            return () => behavior;
+        }
+        
+        if (message === "heal") {
+            return amount => { if (hp > 0) { hp = hp + amount; if (hp > max_hp) { hp = max_hp; } } };
+        }  //治疗师enemy
+
+        if (message === "push") {
+            //接受两个number 推开敌人（敌人间碰撞用） 遇墙则取消
+            return (dx, dy) => {
+                if (sprite !== undefined && hp > 0) {
+                    let pos = query_position(sprite);
+                    let nx = pos[0] + dx;
+                    let ny = pos[1] + dy;
+                    let mpx = player_map_px + (nx - width / 2);
+                    let mpy = player_map_py + (ny - height / 2);
+                    let tl = math_floor((mpx - 20) / tile_pixel);
+                    let tr = math_floor((mpx + 19) / tile_pixel);
+                    let tt = math_floor((mpy - 20) / tile_pixel);
+                    let tb = math_floor((mpy + 19) / tile_pixel);
+                    if (!is_wall(tile_map, tl, tt) && !is_wall(tile_map, tr, tt) &&
+                        !is_wall(tile_map, tl, tb) && !is_wall(tile_map, tr, tb)) {
+                        update_position(sprite, [nx, ny]);
+                    }
+                }
+            };
+        }
+    };
+}
+
+//spawner
+function enemy_spawner(spawn_amount, spawn_rate) { //刷怪器
+
+    let spawn_cooldown = spawn_rate;
+
+    return message => {
+        if (message === "update") {
+            //每帧调用 冷却完毕时从池中激活沉睡敌人 数量随等级动态
+            return () => {
+                spawn_cooldown = spawn_cooldown - 1;
+                if (spawn_cooldown <= 0) {
+                    let mult = 1;
+                    for (let k = 1; k < player_level; k = k + 1) { mult = mult * 1.2; }
+                    let amount = math_round(spawn_amount * mult);
+                    if (player_level <= 2) { amount = amount + 6; }
+                    let spawned = 0;
+                    for (let i = 0; i < array_length(enermys); i = i + 1) {
+                        if (spawned < amount) {
+                            if (!enermys[i]('is_alive')()) {
+                                let tries = 0;
+                                let ok = false;
+                                let sx = 0;
+                                let sy = 0;
+                                while (!ok && tries < 10) {
+                                    let a = math_random() * 2 * math_PI;
+                                    let r = 600;
+                                    sx = width / 2 + r * math_cos(a);
+                                    sy = height / 2 + r * math_sin(a);
+                                    let mpx = player_map_px + (sx - width / 2);
+                                    let mpy = player_map_py + (sy - height / 2);
+                                    let tx = math_floor(mpx / tile_pixel);
+                                    let ty = math_floor(mpy / tile_pixel);
+                                    if (!is_wall(tile_map, tx, ty)) { ok = true; }
+                                    tries = tries + 1;
+                                }
+                                if (ok) {
+                                    enermys[i]('spawn')(sx, sy);
+                                    spawned = spawned + 1;
+                                }
+                            }
+                        }
+                    }
+                    spawn_cooldown = spawn_rate;
+                }
+            };
+        }
+    };
+}
+
+
+//map
+const floor_texture_density = 0.3; // 纹理地板密度（0~1），0=纯地板，1=全纹理
+function generateTileMap(width, height) { 
+    //接受两个number 生成2D数组 这个数组被用于生成瓦片地图
+    const border = 8;
+    let map = [];
+    
+    for (let y = 0; y < height; y = y + 1) {
+        map[y] = [];
+        for (let x = 0; x < width; x = x + 1) {
+            if (y < border || y >= height - border ||
+                x < border || x >= width - border) {
+                map[y][x] = 'wallTop';
+            } else if (y === border) {
+                if (x === border) {
+                    map[y][x] = 'wallLeftBottom';
+                } else if (x === width - border - 1) {
+                    map[y][x] = 'bottomRightWall';
+                } else {
+                    map[y][x] = 'bottomWall';
+                }
+            } else if (y === height - border - 1) {
+                if (x === border) {
+                    map[y][x] = 'topLeftWall';
+                } else if (x === width - border - 1) {
+                    map[y][x] = 'topRightWall';
+                } else {
+                    map[y][x] = 'topWall';
+                }
+            } else if (x === border) {
+                map[y][x] = 'rightWall';
+            } else if (x === width - border - 1) {
+                map[y][x] = 'LeftWall';
+            } else if (y === border + 1 || y === border + 2) {
+                map[y][x] = 'wallCenter';
+            } else {
+                let r = math_random();
+                if (r < floor_texture_density / 2) {
+                    map[y][x] = 'texture1Floor';
+                } else if (r < floor_texture_density) {
+                    map[y][x] = 'texture2Floor';
+                } else {
+                    map[y][x] = 'floor';
+                }
+            }
+        }
+    }
+    return map;
+}
+
+function map(){ //地图类
+    
+
+    function choose_tile_according_to_tilemap(tile_name){
+        //接受一个string 根据tile_name的名字 返回 地图图片
+        if (tile_name === 'LeftWall') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/LeftWall.png');
+        }
+        if (tile_name === 'bottomRightWall') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/bottomRightWall.png');
+        }
+        if (tile_name === 'bottomWall') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/bottomWall.png');
+        }
+        if (tile_name === 'floor') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/floor.png');
+        }
+        if (tile_name === 'rightWall') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/rightWall.png');
+        }
+        if (tile_name === 'texture1Floor') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/texture1Floor.png');
+        }
+        if (tile_name === 'texture2Floor') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/texture2Floor.png');
+        }
+        if (tile_name === 'topLeftWall') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/topLeftWall.png');
+        }
+        if (tile_name === 'topRightWall') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/topRightWall.png');
+        }
+        if (tile_name === 'topWall') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/topWall.png');
+        }
+        if (tile_name === 'wallCenter') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/wallCenter.png');
+        }
+        if (tile_name === 'wallLeftBottom') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/wallLeftBottom.png');
+        }
+        if (tile_name === 'wallRoot') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/wallRoot.png');
+        }
+        if (tile_name === 'wallTop') {
+            return create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/%E5%88%87%E5%A5%BD%E7%9A%84%E5%A2%99%E5%92%8C%E5%9C%B0%E6%9D%BFpng/wallTop.png');
+        }
+        
+    }
+    
+    return message => {
+        
+        if (message==='generate_map') {
+            //接受一个2D数组 根据数组生成瓦片地图
+            return tile_map=>{
+                tile_sprites = [];
+                for (let y=0;y< array_length(tile_map) ; y=y+1){
+                    for (let x=0 ; x < array_length(tile_map[y]) ; x=x+1){
+                        let tile=choose_tile_according_to_tilemap(tile_map[y][x]);
+                        update_position(tile,[
+                            width/2 + 16*2.5*(x - (array_length(tile_map[0]) - 1) / 2),
+                            height/2 + 16*2.5*(y - (array_length(tile_map) - 1) / 2)]);
+                        tile_sprites[array_length(tile_sprites)] = tile;
+                    }
+                }
+                player_map_px = ((array_length(tile_map[0]) - 1) / 2) * tile_pixel;
+                player_map_py = ((array_length(tile_map) - 1) / 2) * tile_pixel;
+            };
+        }
+        
+        
+    };
+}
+
+//particle
+//levelup
+function show_levelup() { //升级UI：随机选3个选项 显示卡牌
+    let picked = [];
+    let pool_size = array_length(upgrade_names);
+    //抽卡
+    for (let i = 0; i < 3; i = i + 1) {
+        let found = false;
+        let r = 0;
+        while (!found) {
+            r = math_floor(math_random() * pool_size);
+            found = true;
+            if (bullet_fire_rate <= 2 && r === 2) { found = false; }
+            if (has_backshot && r === 6) { found = false; }
+            if (has_knockback && r === 7) { found = false; }
+            if (has_bloodlust && r === 8) { found = false; }
+            for (let j = 0; j < array_length(picked); j = j + 1) {
+                if (picked[j] === r) { found = false; }
+            }
+        }
+        picked[array_length(picked)] = r;
+    }
+    //创建矩形选项
+    update_position(lv_title_card, [width / 2, height / 2 - 80]);
+    update_scale(lv_title_card, [3, 0.8]);
+    update_color(lv_title_card, [80, 80, 80, 255]);
+    update_to_top(lv_title_card);
+    update_text(lv_title_text, 'LEVEL UP!');
+    update_position(lv_title_text, [width / 2, height / 2 - 80]);
+    update_scale(lv_title_text, [1, 1]);
+    update_to_top(lv_title_text);
+    for (let i = 0; i < 3; i = i + 1) {
+        let cx = width / 2 + (i - 1) * 180;
+        let cy = height / 2;
+        update_position(lv_cards[i], [cx, cy]);
+        update_scale(lv_cards[i], [3.2, 1.2]);
+        update_color(lv_cards[i], [50, 50, 50, 255]);
+        update_to_top(lv_cards[i]);
+        update_text(lv_texts[i], upgrade_names[picked[i]]);
+        update_color(lv_texts[i], [255, 255, 255, 255]);
+        let on = upgrade_names[picked[i]];
+         if (on === 'Multishot -15%dmg' || on === 'FireRate' || on === 'PrepareForBoth' || on === 'KeepAway') {
+            update_color(lv_texts[i], [255, 200, 0, 255]);
+        }
+        update_position(lv_texts[i], [cx, cy]);
+        update_scale(lv_texts[i], [1, 1]);
+        update_to_top(lv_texts[i]);
+        levelup_options[i] = picked[i];
+    }
+    levelup_active = true;
+    levelup_click_lock = true;
+}
+
+function hide_levelup() { //隐藏升级卡牌
+    update_position(lv_title_card, [-9999, -9999]);
+    update_scale(lv_title_card, [0, 0]);
+    update_position(lv_title_text, [-9999, -9999]);
+    update_scale(lv_title_text, [0, 0]);
+    for (let i = 0; i < 3; i = i + 1) {
+        update_position(lv_cards[i], [-9999, -9999]);
+        update_scale(lv_cards[i], [0, 0]);
+        update_position(lv_texts[i], [-9999, -9999]);
+        update_scale(lv_texts[i], [0, 0]);
+    }
+    levelup_active = false;
+}
+
+function apply_upgrade(index) { //应用升级选项
+    let opt = upgrade_names[index];
+    if (opt === 'Multishot -15%dmg'){ bullets_per_shot = bullets_per_shot + 2; bullet_damage = bullet_damage * 0.85; bullet_total_spread = bullet_total_spread + 0.15; }
+    if (opt === 'Range')            { bullet_range = bullet_range + 120; bullet_life = math_round(bullet_range / bullet_speed); }
+    if (opt === 'FireRate')        { bullet_fire_rate = bullet_fire_rate - 8; if (bullet_fire_rate < 2) { bullet_fire_rate = 2; } }
+    if (opt === 'Size +40%dmg')     { bullet_radius = bullet_radius + 2; bullet_damage = bullet_damage * 1.4; }
+    if (opt === 'Damage +50%')      { bullet_damage = bullet_damage * 1.5; }
+    if (opt === 'Move Speed')       { player_speed = player_speed + 1.5; }
+    if (opt === 'PrepareForBoth')        { has_backshot = true; }
+    if (opt === 'KeepAway')        { has_knockback = true; }
+    if (opt === 'Bloodlust')        { has_bloodlust = true; }
+}
+
+//enemy bullet
+function enemy_bullets(){ //敌方子弹类
+
+    return message => {
+        if (message === "fire") {
+            //接受四个number 从起点射向目标点
+            return (fx, fy, tx, ty) => {
+                let dx = tx - fx;
+                let dy = ty - fy;
+                let dist = math_sqrt(dx * dx + dy * dy);
+                if (dist > 0) {
+                    let done = false;
+                    for (let i = 0; i < eb_pool_size && !done; i = i + 1) {
+                        if (!eb_active[i]) {
+                            update_position(eb_sprites[i], [fx, fy]);
+                            update_color(eb_sprites[i], [255, 100, 100, 255]);
+                            update_scale(eb_sprites[i], [1, 1]);
+                             eb_active[i] = true;
+                            eb_vx[i] = (dx / dist) * eb_speed;
+                            eb_vy[i] = (dy / dist) * eb_speed;
+                            eb_life[i] = 0;
+                            done = true;
+                        }
+                    }
+                }
+            };
+        }
+
+        if (message === "update_all") {
+            //遍历活跃子弹 移动、碰玩家扣血、越界/碰墙停用
+            return () => {
+                for (let i = 0; i < eb_pool_size; i = i + 1) {
+                    if (eb_active[i]) {
+                        eb_life[i] = eb_life[i] + 1;
+                        let pos = query_position(eb_sprites[i]);
+                        let nx = pos[0] + eb_vx[i];
+                        let ny = pos[1] + eb_vy[i];
+                        update_position(eb_sprites[i], [nx, ny]);
+                        let pdx = nx - width / 2;
+                        let pdy = ny - height / 2;
+                        let hit = false;
+                        if (math_abs(pdx) < 15 && math_abs(pdy) < 15 &&
+                            pdx * pdx + pdy * pdy < 225) {
+                            hit = true;
+                            if (player_hurt_cd <= 0) {
+                                player()('damage')(1);
+                                player_hurt_cd = player_hurt_interval;
+                            }
+                        }
+                        let mpx = player_map_px + (nx - width / 2);
+                        let mpy = player_map_py + (ny - height / 2);
+                        let tx = math_floor(mpx / tile_pixel);
+                        let ty = math_floor(mpy / tile_pixel);
+                        if (eb_life[i] >= eb_max_life || is_wall(tile_map, tx, ty) || hit) {
+                            eb_active[i] = false;
+                            update_scale(eb_sprites[i], [0, 0]);
+                            update_position(eb_sprites[i], [-9999, -9999]);
+                        }
+                    }
+                }
+            };
+        }
+
+        if (message === "update_map_offset") {
+            //接受两个number 地图移动时eb同步偏移
+            return (dx, dy) => {
+                for (let i = 0; i < eb_pool_size; i = i + 1) {
+                    if (eb_active[i]) {
+                        let pos = query_position(eb_sprites[i]);
+                        update_position(eb_sprites[i], [pos[0] - dx, pos[1] - dy]);
+                    }
+                }
+            };
+        }
+    };
+}
+
+function particles(){ //粒子类
+
+    return message => {
+        if (message === "bomb_emit") {
+            //爆炸怪专用 大范围粒子
+            return (x, y) => {
+                let emitted = 0;
+                for (let i = 0; i < particle_pool_size && emitted < 24; i = i + 1) {
+                    if (!p_active[i]) {
+                        let a = math_random() * 2 * math_PI;
+                        let sp = 4 * math_random();
+                        update_position(p_sprites[i], [x, y]);
+                        update_color(p_sprites[i], [255, 100, 20, 255]);
+                        update_scale(p_sprites[i], [1.5, 1.5]);
+                        p_active[i] = true;
+                        p_vx[i] = sp * math_cos(a);
+                        p_vy[i] = sp * math_sin(a);
+                        p_life[i] = 30;
+                        p_is_bomb[i] = true;
+                        p_is_heal[i] = false;
+                        emitted = emitted + 1;
+                    }
+                }
+            };
+        }
+
+        if (message === "heal_emit") {   //治疗怪专用
+            return (x, y) => {
+                let emitted = 0;
+                for (let i = 0; i < particle_pool_size && emitted < 12; i = i + 1) {
+                    if (!p_active[i]) {
+                        let a = math_random() * 2 * math_PI;
+                        let sp = 2 * math_random();
+                        update_position(p_sprites[i], [x, y]);
+                        update_color(p_sprites[i], [0, 255, 0, 255]);
+                        update_scale(p_sprites[i], [2.5, 2.5]);
+                        p_active[i] = true; p_vx[i] = sp*math_cos(a); p_vy[i] = sp*math_sin(a);
+                        p_life[i] = 25; p_is_bomb[i] = false; p_is_heal[i] = true;
+                        emitted = emitted + 1;
+                    }
+                }
+            };
+        }
+
+        if (message === "emit") {
+            //接受两个number x,y 在该位置生成爆炸粒子
+            return (x, y) => {
+                let emitted = 0;
+                for (let i = 0; i < particle_pool_size && emitted < particle_count; i = i + 1) {
+                    if (!p_active[i]) {
+                        let a = math_random() * 2 * math_PI;
+                        let sp = particle_speed * math_random();
+                        update_position(p_sprites[i], [x, y]);
+                        update_color(p_sprites[i], [255, 255, 255, 255]);
+                        update_scale(p_sprites[i], [1, 1]);
+                        p_active[i] = true;
+                        p_vx[i] = sp * math_cos(a);
+                        p_vy[i] = sp * math_sin(a);
+                        p_life[i] = particle_life;
+                        p_is_bomb[i] = false;
+                        p_is_heal[i] = false;
+                        emitted = emitted + 1;
+                    }
+                }
+            };
+        }
+
+        if (message === "update_all") {
+            //遍历活跃粒子 移动、衰减、归零后停用
+            return () => {
+                for (let i = 0; i < particle_pool_size; i = i + 1) {
+                    if (p_active[i]) {
+                        let pos = query_position(p_sprites[i]);
+                        let nx = pos[0] + p_vx[i];
+                        let ny = pos[1] + p_vy[i];
+                        update_position(p_sprites[i], [nx, ny]);
+                        p_life[i] = p_life[i] - 1;
+                        let max_life = particle_life;
+                        if (p_is_bomb[i]) { max_life = 30; }
+                        let a = math_round(255 * p_life[i] / max_life);
+                        if (p_is_bomb[i]) {
+                            update_color(p_sprites[i], [255, 100, 20, a]);
+                        } else if (p_is_heal[i]) {
+                            update_color(p_sprites[i], [50, 255, 50, a]);
+                        } else {
+                            update_color(p_sprites[i], [255, 255, 255, a]);
+                        }
+                        if (p_life[i] <= 0) {
+                            p_active[i] = false;
+                            update_position(p_sprites[i], [-9999, -9999]);
+                            update_scale(p_sprites[i], [0, 0]);
+                        }
+                    }
+                }
+            };
+        }
+    };
+}
+
+function gun(){ //枪类
+    
+    const gun_offset = 20; // 枪离屏幕中心的距离（像素）
+    
+    return message => {
+        if (message === "create_gun") {
+            //不接受参数 创建枪对象
+            const gun_ins= create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/AK47.png');
+            return update_scale(gun_ins,[gun_scale,gun_scale]);
+        }
+        
+        if (message === "update_gun") {
+            //接受gun对象 将其放在屏幕中心到鼠标的连线上 并旋转指向鼠标
+            return gun => {
+                let mouse_pos = query_pointer_position();
+                let dx = mouse_pos[0] - width / 2;
+                let dy = mouse_pos[1] - height / 2;
+                let angle = math_atan2(dy, dx);
+                let gun_x = width / 2 + gun_offset * math_cos(angle);
+                let gun_y = height / 2 + gun_offset * math_sin(angle);
+                update_position(gun, [gun_x, gun_y]);
+                return update_rotation(gun, angle);
+            };
+        }
+    };
+}
+
+function bullets(){ //子弹类
+
+    const spawn_dist = 30; // 子弹生成点离屏幕中心的距离
+
+    return message => {
+
+        if (message === "fire") {
+            //接受鼠标位置 按bullets_per_shot散射发射多颗子弹
+            return mouse_pos => {
+                let dx = mouse_pos[0] - width / 2;
+                let dy = mouse_pos[1] - height / 2;
+                let base = math_atan2(dy, dx);
+                let step = bullets_per_shot > 1
+                    ? bullet_total_spread / (bullets_per_shot - 1)
+                    : 0;
+                let half = bullet_total_spread / 2;
+                let fired = 0;
+                for (let i = 0; i < bullet_pool_size && fired < bullets_per_shot; i = i + 1) {
+                    if (!b_active[i]) {
+                        let a = base - half + fired * step;
+                        let sx = width / 2 + spawn_dist * math_cos(a);
+                        let sy = height / 2 + spawn_dist * math_sin(a);
+                        let bs = bullet_radius / 4;
+                        update_scale(b_sprites[i], [bs, bs]);
+                        update_position(b_sprites[i], [sx, sy]);
+                        b_active[i] = true;
+                        b_vx[i] = bullet_speed * math_cos(a);
+                        b_vy[i] = bullet_speed * math_sin(a);
+                        b_life[i] = 0;
+                        fired = fired + 1;
+                    }
+                }
+                if (has_backshot) {
+                    let done = false;
+                    for (let i = 0; i < bullet_pool_size && !done; i = i + 1) {
+                        if (!b_active[i]) {
+                            let ba = base + math_PI;
+                            let bs = bullet_radius / 4;
+                            let sx2 = width / 2 + spawn_dist * math_cos(ba);
+                            let sy2 = height / 2 + spawn_dist * math_sin(ba);
+                            update_scale(b_sprites[i], [bs, bs]);
+                            update_position(b_sprites[i], [sx2, sy2]);
+                            b_active[i] = true;
+                            b_vx[i] = bullet_speed * math_cos(ba);
+                            b_vy[i] = bullet_speed * math_sin(ba);
+                            b_life[i] = 0;
+                            done = true;
+                        }
+                    }
+                }
+            };
+        }
+
+        if (message === "update_all") {
+            //遍历池中活跃子弹 移动、衰减、碰撞、越界则停用
+            return () => {
+                let ec3 = array_length(enermys);
+                for (let i = 0; i < bullet_pool_size; i = i + 1) {
+                    if (b_active[i]) {
+                        b_life[i] = b_life[i] + 1;
+                        let sf = 1 - b_life[i] / bullet_life;
+                        let cvx = b_vx[i] * sf;
+                        let cvy = b_vy[i] * sf;
+                        let pos = query_position(b_sprites[i]);
+                        let nx = pos[0] + cvx;
+                        let ny = pos[1] + cvy;
+                        update_position(b_sprites[i], [nx, ny]);
+                        let mpx = player_map_px + (nx - width / 2);
+                        let mpy = player_map_py + (ny - height / 2);
+                        let tx = math_floor(mpx / tile_pixel);
+                        let ty = math_floor(mpy / tile_pixel);
+                        let hit = false;
+                        for (let j = 0; j < ec3 && !hit; j = j + 1) {
+                            if (enermys[j]('is_alive')()) {
+                                let ep = query_position(enermys[j]('get_sprite')());
+                                let edx = nx - ep[0];
+                                let edy = ny - ep[1];
+                                if (math_sqrt(edx * edx + edy * edy) < 24) {
+                                    enermys[j]('damage')(1);
+                                    hit = true;
+                                    if (has_knockback) {
+                                        let bv = enermys[j]('get_behavior')();
+                                        let kstr = 15;
+                                        if (bv === 3 || bv === 4) { kstr = 5; }
+                                        let pdx = ep[0] - width / 2;
+                                        let pdy = ep[1] - height / 2;
+                                        let pdist = math_sqrt(pdx * pdx + pdy * pdy);
+                                        if (pdist > 0) {
+                                            enermys[j]('push')(pdx / pdist * kstr, pdy / pdist * kstr);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (sf <= 0 || is_wall(tile_map, tx, ty) || hit) {
+                            b_active[i] = false;
+                            update_scale(b_sprites[i], [0, 0]);
+                            update_position(b_sprites[i], [-9999, -9999]);
+                        }
+                    }
+                }
+            };
+        }
+
+    };
+}
+
+
+
+
+
+
+
+
+//移动
+//以下三个函数为阻止玩家离开边界的函数
+function is_wall(tile_map, x, y) { //无需在意
+    if (x < 0 || x >= array_length(tile_map[0]) ||
+        y < 0 || y >= array_length(tile_map)) {
+        return true;
+    }
+    let t = tile_map[y][x];
+    return t === 'wallTop' ||
+           t === 'wallCenter' ||
+           t === 'wallLeftBottom' || t === 'bottomWall' ||
+           t === 'bottomRightWall' || t === 'rightWall' ||
+           t === 'LeftWall' ||
+           t === 'topLeftWall' || t === 'topWall' ||
+           t === 'topRightWall';
+}
+
+function can_move_x(tile_map, px, py, dx) { //无需在意
+    if (dx > 0) {
+        let check_x = math_floor((px + dx + tile_pixel - 1) / tile_pixel);
+        let top_y   = math_floor(py / tile_pixel);
+        let bot_y   = math_floor((py + tile_pixel - 1) / tile_pixel);
+        return !(is_wall(tile_map, check_x, top_y) ||
+                 is_wall(tile_map, check_x, bot_y));
+    } else if (dx < 0) {
+        let check_x = math_floor((px + dx) / tile_pixel);
+        let top_y   = math_floor(py / tile_pixel);
+        let bot_y   = math_floor((py + tile_pixel - 1) / tile_pixel);
+        return !(is_wall(tile_map, check_x, top_y) ||
+                 is_wall(tile_map, check_x, bot_y));
+    }
+    return true;
+}
+
+function can_move_y(tile_map, px, py, dy) { //无需在意
+    if (dy > 0) {
+        let left_x  = math_floor(px / tile_pixel);
+        let right_x = math_floor((px + tile_pixel - 1) / tile_pixel);
+        let check_y = math_floor((py + dy + tile_pixel - 1) / tile_pixel);
+        return !(is_wall(tile_map, left_x, check_y) ||
+                 is_wall(tile_map, right_x, check_y));
+    } else if (dy < 0) {
+        let left_x  = math_floor(px / tile_pixel);
+        let right_x = math_floor((px + tile_pixel - 1) / tile_pixel);
+        let check_y = math_floor((py + dy) / tile_pixel);
+        return !(is_wall(tile_map, left_x, check_y) ||
+                 is_wall(tile_map, right_x, check_y));
+    }
+    return true;
+}
+
+//输入
+function input_listener(){ 
+    let dx = 0;
+    let dy = 0;
+    
+    if (input_key_down('w')) { dy = dy - player_speed; }
+    if (input_key_down('s')) { dy = dy + player_speed; }
+    if (input_key_down('a')) { 
+        dx = dx - player_speed; 
+        player()('determine_direction')(player_instance,dx);
+    }
+    if (input_key_down('d')) {
+        dx = dx + player_speed;
+        player()('determine_direction')(player_instance,dx);
+    }
+    
+    if (dx !== 0 && dy !== 0) {
+        let diag = player_speed / math_sqrt(2);
+        dx = dx > 0 ? diag : -diag;
+        dy = dy > 0 ? diag : -diag;
+    }
+    
+    player_moving = (dx !== 0 || dy !== 0);
+    
+    let ec = array_length(enermys);
+    let tc = array_length(tile_sprites);
+    
+    if (dx !== 0 && can_move_x(tile_map, player_map_px, player_map_py, dx)) {
+        let was_hit = false;
+        for (let i = 0; i < ec; i = i + 1) {
+            if (enermys[i]('is_alive')() &&
+                gameobjects_overlap(player_instance, enermys[i]('get_sprite')())) {
+                was_hit = true;
+            }
+        }
+        player_map_px = player_map_px + dx;
+        for (let i = 0; i < tc; i = i + 1) {
+            let pos = query_position(tile_sprites[i]);
+            update_position(tile_sprites[i], [pos[0] - dx, pos[1]]);
+        }
+        for (let i = 0; i < ec; i = i + 1) {
+            enermys[i]('update_map_offset')(dx, 0);
+        }
+        enemy_bullets()('update_map_offset')(dx, 0);
+        let now_hit = false;
+        for (let i = 0; i < ec && !now_hit; i = i + 1) {
+            if (enermys[i]('is_alive')() &&
+                gameobjects_overlap(player_instance, enermys[i]('get_sprite')())) {
+                now_hit = true;
+            }
+        }
+        if (!was_hit && now_hit) {
+            player_map_px = player_map_px - dx;
+            for (let i = 0; i < tc; i = i + 1) {
+                let pos = query_position(tile_sprites[i]);
+                update_position(tile_sprites[i], [pos[0] + dx, pos[1]]);
+            }
+            for (let i = 0; i < ec; i = i + 1) {
+                enermys[i]('update_map_offset')(-dx, 0);
+            }
+            enemy_bullets()('update_map_offset')(-dx, 0);
+        }
+    }
+    
+    if (dy !== 0 && can_move_y(tile_map, player_map_px, player_map_py, dy)) {
+        let was_hit = false;
+        for (let i = 0; i < ec; i = i + 1) {
+            if (enermys[i]('is_alive')() &&
+                gameobjects_overlap(player_instance, enermys[i]('get_sprite')())) {
+                was_hit = true;
+            }
+        }
+        player_map_py = player_map_py + dy;
+        for (let i = 0; i < tc; i = i + 1) {
+            let pos = query_position(tile_sprites[i]);
+            update_position(tile_sprites[i], [pos[0], pos[1] - dy]);
+        }
+        for (let i = 0; i < ec; i = i + 1) {
+            enermys[i]('update_map_offset')(0, dy);
+        }
+        enemy_bullets()('update_map_offset')(0, dy);
+        let now_hit = false;
+        for (let i = 0; i < ec && !now_hit; i = i + 1) {
+            if (enermys[i]('is_alive')() &&
+                gameobjects_overlap(player_instance, enermys[i]('get_sprite')())) {
+                now_hit = true;
+            }
+        }
+        if (!was_hit && now_hit) {
+            player_map_py = player_map_py - dy;
+            for (let i = 0; i < tc; i = i + 1) {
+                let pos = query_position(tile_sprites[i]);
+                update_position(tile_sprites[i], [pos[0], pos[1] + dy]);
+            }
+            for (let i = 0; i < ec; i = i + 1) {
+                enermys[i]('update_map_offset')(0, -dy);
+            }
+            enemy_bullets()('update_map_offset')(0, -dy);
+        }
+    }
+    
+}
+
+
+// 游戏初始化
+    
+    //map
+    const tile_map=generateTileMap(60,55);
+    map()('generate_map')(tile_map);
+    //player
+    const player_instance = player()('create_player');
+    player()('update_position')(player_instance);
+    player_frame2 = create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/player_frame2.png');
+    update_scale(player_frame2, [0, 0]);
+    update_position(player_frame2, [width / 2, height / 2]);
+    //gun
+    const gun_instance = gun()('create_gun');
+    //levelup cards
+    lv_title_card = create_rectangle(50, 50);
+    update_position(lv_title_card, [-9999, -9999]);
+    update_scale(lv_title_card, [0, 0]);
+    lv_title_text = create_text('');
+    update_position(lv_title_text, [-9999, -9999]);
+    update_scale(lv_title_text, [0, 0]);
+    for (let i = 0; i < 3; i = i + 1) {
+        lv_cards[i] = create_rectangle(50, 50);
+        update_position(lv_cards[i], [-9999, -9999]);
+        update_scale(lv_cards[i], [0, 0]);
+        lv_texts[i] = create_text('');
+        update_position(lv_texts[i], [-9999, -9999]);
+        update_scale(lv_texts[i], [0, 0]);
+    }
+    //bullet pool
+    for (let i = 0; i < bullet_pool_size; i = i + 1) {
+        b_sprites[i] = create_rectangle(bullet_radius * 2, bullet_radius * 2);
+        update_position(b_sprites[i], [-100, -100]);
+        b_active[i] = false;
+        b_vx[i] = 0;
+        b_vy[i] = 0;
+    }
+    //enemy bullet pool
+    for (let i = 0; i < eb_pool_size; i = i + 1) {
+        eb_sprites[i] = create_rectangle(6, 6);
+        update_position(eb_sprites[i], [-9999, -9999]);
+        update_scale(eb_sprites[i], [0, 0]);
+        eb_active[i] = false;
+        eb_vx[i] = 0;
+        eb_vy[i] = 0;
+        eb_life[i] = 0;
+    }
+    //enemy pool
+    const elf_url = 'https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/monster/monster_chort.png';
+    const slime_url = 'https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/monster/monster_bat.png';
+    const orc_url = 'https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/monster/monster_ogre.png';
+    const mage_url = 'https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/monster/monster_necromancer.png';
+    const goo_url = 'https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/main/monster/monster_elemental_plant.png';
+    const bomb_url = 'https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/monster_elemental_fire.png';
+    const max_pool_size = 150;
+    for (let i = 0; i < max_pool_size; i = i + 1) {
+        let rand = math_random();
+        let new_enemy = undefined;
+        const max_pool_size = 200;
+        if (rand < 0.23) { 
+            new_enemy = enemy(5, 1.5, elf_url, 1); 
+        }else if (rand < 0.40) {
+            new_enemy = enemy(2, 1.8, slime_url, 2); 
+        }else if (rand < 0.57) { 
+            new_enemy = enemy(10, 0.2, orc_url, 3);
+        }else if (rand < 0.74) {
+            new_enemy = enemy(4, 0.8, mage_url, 4); 
+        }
+        else if (rand < 0.91) {
+            new_enemy = enemy(5, 1.5, bomb_url, 5); 
+        }
+        else {
+            new_enemy = enemy(3, 0.6, goo_url, 6); 
+        } //新增怪物后调整生成怪物比例
+
+        new_enemy('init')();
+        enermys[i] = new_enemy;
+    }
+    for (let i = max_pool_size - 1; i > 0; i = i - 1) {
+        let j = math_floor(math_random() * (i + 1));
+        let tmp = enermys[i];
+        enermys[i] = enermys[j];
+        enermys[j] = tmp;
+    }
+    const spawner_instance = enemy_spawner(4, 360);
+    for (let i = 0; i < 3; i = i + 1) {
+        let a = math_random() * 2 * math_PI;
+        let sx = width / 2 + 600 * math_cos(a);
+        let sy = height / 2 + 600 * math_sin(a);
+        enermys[i]('spawn')(sx, sy);
+    }
+    //UI
+    hpBarBackground = create_rectangle(hpBarWidth, hpBarHeight);
+    update_color(hpBarBackground, [15, 15, 15, 255]);
+    hpBarFill = create_rectangle(hpBarWidth, hpBarHeight);
+    update_color(hpBarFill, [255, 20, 20, 255]);
+    xpBarBackground = create_rectangle(width, 8);
+    update_color(xpBarBackground, [15, 15, 15, 255]);
+    xpBarFill = create_rectangle(width, 8);
+    update_color(xpBarFill, [20, 200, 20, 255]);
+    gameover_card = create_rectangle(200, 60);
+    update_position(gameover_card, [-9999, -9999]);
+    update_scale(gameover_card, [0, 0]);
+    gameover_text = create_text('');
+    update_position(gameover_text, [-9999, -9999]);
+    update_scale(gameover_text, [0, 0]);
+    //particle pool
+    for (let i = 0; i < particle_pool_size; i = i + 1) {
+        p_sprites[i] = create_rectangle(4, 4);
+        update_position(p_sprites[i], [-9999, -9999]);
+        update_scale(p_sprites[i], [0, 0]);
+        p_active[i] = false;
+        p_vx[i] = 0;
+        p_vy[i] = 0;
+        p_life[i] = 0; p_is_bomb[i] = false;
+    }
+    // lightCover
+    const lightCover=update_scale(create_sprite('https://raw.githubusercontent.com/StoreManager-Riddle/SourceAcademyProject/refs/heads/TEST/lightCover.png'),[2.25,2.25]);
+    update_position(lightCover,[width/2,height/2]);
+
+
+
+
+
+
+//游戏主循环
+update_loop((game_state) => {
+    // Update gameobjects inside update_loop
+    
+    
+    
+    
+    
+    if (player_hp <= 0) {
+        gameover_active = true;
+    }
+    if (gameover_active) {
+        update_position(gameover_card, [width / 2, height / 2]);
+        update_scale(gameover_card, [4, 1.2]);
+        update_color(gameover_card, [30, 30, 30, 255]);
+        update_to_top(gameover_card);
+        update_text(gameover_text, 'GAME OVER');
+        update_position(gameover_text, [width / 2, height / 2]);
+        update_scale(gameover_text, [1, 1]);
+        update_to_top(gameover_text);
+    }
+    if (!levelup_active && !gameover_active) {
+        const barX = 25;
+        const barY = 25;
+        update_position(hpBarBackground, [barX, barY]);
+        update_position(hpBarFill, [barX, barY]);
+        update_to_top(hpBarBackground);
+        update_to_top(hpBarFill);
+        let hpRatio = player_hp / player_max_hp;
+        update_scale(hpBarFill, [hpRatio, 1]);
+        let xpNeed = 3 + 2 * player_level;
+        let xpRatio = player_kills / xpNeed;
+        update_position(xpBarBackground, [width / 2, 4]);
+        update_position(xpBarFill, [width / 2, 4]);
+        update_to_top(xpBarBackground);
+        update_to_top(xpBarFill);
+        update_scale(xpBarFill, [xpRatio, 1]);
+        if (player_hurt_cd > 0) { player_hurt_cd = player_hurt_cd - 1; }
+        player()('update_color')(player_instance);
+
+        if (player_moving) {
+            player_anim_timer = player_anim_timer + 1;
+            if (player_anim_timer >= 25) {
+                player_anim_timer = 0;
+                if (query_scale(player_instance)[0] !== 0) {
+                    update_scale(player_instance, [0, 0]);
+                    update_scale(player_frame2, [player_dir_sign * player_scale, player_scale]);
+                } else {
+                    update_scale(player_instance, [player_dir_sign * player_scale, player_scale]);
+                    update_scale(player_frame2, [0, 0]);
+                }
+            }
+        } else {
+            update_scale(player_instance, [player_dir_sign * player_scale, player_scale]);
+            update_scale(player_frame2, [0, 0]);
+        }
+        player()('update_color')(player_frame2);
+
+        input_listener();
+
+        spawner_instance('update')();
+        
+        gun()('update_gun')(gun_instance);
+    
+    if (fire_cooldown > 0) {
+        fire_cooldown = fire_cooldown - 1;
+    }
+    if (input_left_mouse_down() && fire_cooldown <= 0) {
+        play_audio(shoot_sound);
+        bullets()('fire')(query_pointer_position());
+        fire_cooldown = bullet_fire_rate;
+    }
+    bullets()('update_all')();
+    
+    particles()('update_all')();
+    
+    enemy_bullets()('update_all')();
+    
+    let ec2 = array_length(enermys);
+    for (let i = 0; i < ec2; i = i + 1) {
+        enermys[i]('chase_player')();
+    }
+    for (let i = 0; i < ec2; i = i + 1) {
+        for (let j = i + 1; j < ec2; j = j + 1) {
+            if (enermys[i]('is_alive')() && enermys[j]('is_alive')()) {
+                let p1 = query_position(enermys[i]('get_sprite')());
+                let p2 = query_position(enermys[j]('get_sprite')());
+                let edx = p1[0] - p2[0];
+                let edy = p1[1] - p2[1];
+                if (math_abs(edx) < 40 && math_abs(edy) < 40) {
+                    let ed = math_sqrt(edx * edx + edy * edy);
+                    if (ed < 40 && ed > 0) {
+                        let overlap = (40 - ed) / 2;
+                        let px = (edx / ed) * overlap;
+                        let py = (edy / ed) * overlap;
+                        enermys[i]('push')(px, py);
+                        enermys[j]('push')(-px, -py);
+                    }
+                }
+            }
+        }
+    }
+    
+    for (let i = 0; i < ec2; i = i + 1) {
+        if (enermys[i]('is_alive')()) {
+            let p_enemy = query_position(enermys[i]('get_sprite')());
+            let edx = p_enemy[0] - width / 2;
+            let edy = p_enemy[1] - height / 2;
+            let ed = math_sqrt(edx * edx + edy * edy);
+            if (ed < 30 && ed > 0) {
+                let overlap = 30 - ed;
+                let px = (edx / ed) * overlap;
+                let py = (edy / ed) * overlap;
+                enermys[i]('push')(px, py);
+                if (player_hurt_cd <= 0) {
+                    player()('damage')(1);
+                    player_hurt_cd = player_hurt_interval;
+                }
+            }
+        }
+    }
+    }
+    
+    if (levelup_click_lock && !input_left_mouse_down()) {
+        levelup_click_lock = false;
+    }
+    if (levelup_active && !levelup_click_lock && input_left_mouse_down()) {
+        let mp = query_pointer_position();
+        for (let i = 0; i < 3; i = i + 1) {
+            let cx = width / 2 + (i - 1) * 180;
+            let cy = height / 2;
+            if (mp[0] > cx - 80 && mp[0] < cx + 80 &&
+                mp[1] > cy - 30 && mp[1] < cy + 30) {
+                apply_upgrade(levelup_options[i]);
+                hide_levelup();
+            }
+        }
+    }
+
+    // Using game_state as a counter
+    if (game_state[0] === undefined) {
+        game_state[0] = 0;
+    }
+    game_state[0] = game_state[0] + 1;
+});
+
+play_audio(bgm); loop_audio(bgm);
+build_game();
